@@ -9,12 +9,13 @@ import (
 	"math"
 	"net/http"
 	"strconv"
-	"time"
+	"sync"
 
 	binance_connector "github.com/binance/binance-connector-go"
 )
 
-func BinanceTickerPrice(channel chan float64, client *binance_connector.WebsocketAPIClient) {
+func BinanceTickerPrice(channel chan float64, client *binance_connector.WebsocketAPIClient, wg *sync.WaitGroup) {
+	defer wg.Done()
 	response, err := client.NewTickerPriceService().Symbol("ETHUSDT").Do(context.Background())
 	if err != nil {
 		log.Fatalf("Error reading price: %v", err.Error())
@@ -27,7 +28,8 @@ func BinanceTickerPrice(channel chan float64, client *binance_connector.Websocke
 	return
 }
 
-func UniswapTickerPrice(channel chan float64) {
+func UniswapTickerPrice(channel chan float64, wg *sync.WaitGroup) {
+	defer wg.Done()
 	// this api https://tradingstrategy.ai/api/explorer/#/Trading%20pair/web_pair_details
 	// returning tickerPrice from uniswap exchange using v2 protocol
 	response, err := http.Get("https://tradingstrategy.ai/api/pair-details?exchange_slug=sushiswap&chain_slug=ethereum&pair_slug=ETH-USDT")
@@ -72,6 +74,7 @@ func ComparePrice(uniswap chan float64, binance chan float64) {
 }
 
 func main() {
+	var wg sync.WaitGroup
 	uniswap := make(chan float64, 1)
 	binance := make(chan float64, 1)
 	client := binance_connector.NewWebsocketAPIClient("", "", "wss://testnet.binance.vision/ws-api/v3")
@@ -82,10 +85,11 @@ func main() {
 		return
 	}
 	for {
-		go UniswapTickerPrice(uniswap)
-		go BinanceTickerPrice(binance, client)
+		wg.Add(2)
+		go UniswapTickerPrice(uniswap, &wg)
+		go BinanceTickerPrice(binance, client, &wg)
+		wg.Wait()
 		go ComparePrice(uniswap, binance)
-		time.Sleep(1 * time.Second)
 	}
 
 }
